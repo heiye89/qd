@@ -55,9 +55,12 @@ static int proc_maps_get(struct proc_maps_args __user *uargs)
         return -EINVAL;
     }
 
-    vma = MM_MMAP(mm);
-    while (vma && count < args.max_count) {
+    QDYM_VMA_ITERATOR(vmi, mm);
+    QDYM_FOR_EACH_VMA(vmi, vma) {
         struct file *file;
+
+        if (count >= args.max_count)
+            break;
 
         kbuf[count].vm_start = VMA_VM_START(vma);
         kbuf[count].vm_end   = VMA_VM_END(vma);
@@ -77,7 +80,6 @@ static int proc_maps_get(struct proc_maps_args __user *uargs)
         }
 
         count++;
-        vma = VMA_VM_NEXT(vma);
     }
 
     MMPUT(mm);

@@ -4,6 +4,11 @@
 #include "linux_kernel_api.h"
 #include "proc_root_auto_offset.h"
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+#include <linux/maple_tree.h>
+#include <linux/limits.h>
+#endif
+
 /* Detected offsets for struct mm_struct */
 static unsigned long g_offset_mm_mmap;
 static unsigned long g_offset_mm_arg_start;
@@ -23,7 +28,6 @@ static unsigned long g_offset_vma_vm_file;
 static unsigned long g_offset_vma_vm_next;
 static unsigned long g_offset_vma_vm_pgoff;
 
-#define MM_MMAP(mm)        (*(struct vm_area_struct **)((unsigned char *)(mm) + g_offset_mm_mmap))
 #define MM_ARG_START(mm)   (*(unsigned long *)((unsigned char *)(mm) + g_offset_mm_arg_start))
 #define MM_ARG_END(mm)     (*(unsigned long *)((unsigned char *)(mm) + g_offset_mm_arg_end))
 #define MM_ENV_START(mm)   (*(unsigned long *)((unsigned char *)(mm) + g_offset_mm_env_start))
@@ -37,8 +41,41 @@ static unsigned long g_offset_vma_vm_pgoff;
 #define VMA_VM_END(vma)    (*(unsigned long *)((unsigned char *)(vma) + g_offset_vma_vm_end))
 #define VMA_VM_FLAGS(vma)  (*(unsigned long *)((unsigned char *)(vma) + g_offset_vma_vm_flags))
 #define VMA_VM_FILE(vma)   (*(struct file **)((unsigned char *)(vma) + g_offset_vma_vm_file))
-#define VMA_VM_NEXT(vma)   (*(struct vm_area_struct **)((unsigned char *)(vma) + g_offset_vma_vm_next))
 #define VMA_VM_PGOFF(vma)  (*(unsigned long *)((unsigned char *)(vma) + g_offset_vma_vm_pgoff))
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+
+/* 6.1+: VMA is stored in a maple tree. vm_next / mm->mmap no longer exist. */
+
+#define QDYM_VMA_ITERATOR(vmi, mm)                                             \
+    VMA_ITERATOR(vmi, (mm), 0)
+
+#define QDYM_FOR_EACH_VMA(vmi, vma)                                            \
+    for_each_vma(vmi, vma)
+
+static inline struct vm_area_struct *qdym_first_vma(struct mm_struct *mm)
+{
+    VMA_ITERATOR(vmi, mm, 0);
+    return vma_find(&vmi, ULONG_MAX);
+}
+
+#else /* < 6.1: linked list */
+
+#define MM_MMAP(mm)        (*(struct vm_area_struct **)((unsigned char *)(mm) + g_offset_mm_mmap))
+#define VMA_VM_NEXT(vma)   (*(struct vm_area_struct **)((unsigned char *)(vma) + g_offset_vma_vm_next))
+
+#define QDYM_VMA_ITERATOR(vmi, mm)                                             \
+    struct vm_area_struct *vmi = MM_MMAP(mm)
+
+#define QDYM_FOR_EACH_VMA(vmi, vma)                                            \
+    for (vma = vmi; vma != NULL; vma = VMA_VM_NEXT(vma))
+
+static inline struct vm_area_struct *qdym_first_vma(struct mm_struct *mm)
+{
+    return MM_MMAP(mm);
+}
+
+#endif
 
 static int __detect_mm_vma_offsets(void)
 {
@@ -60,7 +97,8 @@ static int __detect_mm_vma_offsets(void)
 
     mm_base = (unsigned char *)mm;
 
-    /* mmap is typically the first field in mm_struct */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
+    /* mmap field only exists in pre-maple-tree kernels */
     vma = mm->mmap;
     for (i = 0; i < scan_size; i += sizeof(void *)) {
         struct vm_area_struct **vp = (struct vm_area_struct **)(mm_base + i);
@@ -71,8 +109,11 @@ static int __detect_mm_vma_offsets(void)
             break;
         }
     }
+#else
+    vma = qdym_first_vma(mm);
+#endif
 
-    /* arg_start / arg_end: scan for values matching mm_struct.arg_start */
+    /* arg_start / arg_end */
     for (i = 0; i < scan_size; i += sizeof(unsigned long)) {
         unsigned long *lp = (unsigned long *)(mm_base + i);
         if (*lp == mm->arg_start && mm->arg_start) {
@@ -131,6 +172,7 @@ static int __detect_mm_vma_offsets(void)
                 break;
             }
         }
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
         for (i = 0; i < vma_scan; i += sizeof(void *)) {
             struct vm_area_struct **vp = (struct vm_area_struct **)(vma_base + i);
             if (*vp == vma->vm_next) {
@@ -139,6 +181,7 @@ static int __detect_mm_vma_offsets(void)
                 break;
             }
         }
+#endif
     }
 
     pr_info("proc_maps_auto_offset: detection complete\n");

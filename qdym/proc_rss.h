@@ -41,26 +41,12 @@ static int proc_rss_get(struct proc_rss_args __user *uargs)
     if (!mm)
         return -EINVAL;
 
-    vma = MM_MMAP(mm);
-    while (vma) {
+    rss_pages = get_mm_rss(mm);
+
+    QDYM_VMA_ITERATOR(vmi, mm);
+    QDYM_FOR_EACH_VMA(vmi, vma) {
         unsigned long size = VMA_VM_END(vma) - VMA_VM_START(vma);
         vss_pages += size / PAGE_SIZE;
-
-        /* Approximate RSS: count pages in resident set */
-        if (VMA_VM_FLAGS(vma) & VM_READ) {
-            unsigned long addr;
-            int numpages = 0;
-            for (addr = VMA_VM_START(vma);
-                 addr < VMA_VM_END(vma);
-                 addr += PAGE_SIZE) {
-                char dummy;
-                if (ACCESS_REMOTE_VM(mm, addr, &dummy, 1, 0) > 0)
-                    numpages++;
-            }
-            rss_pages += numpages;
-        }
-
-        vma = VMA_VM_NEXT(vma);
     }
 
     MMPUT(mm);
@@ -68,7 +54,7 @@ static int proc_rss_get(struct proc_rss_args __user *uargs)
     memset(&info, 0, sizeof(info));
     info.rss = rss_pages * PAGE_SIZE;
     info.vss = vss_pages * PAGE_SIZE;
-    info.pss = info.rss; /* PSS requires advanced accounting, approximate */
+    info.pss = info.rss;
 
     args.info = info;
 
