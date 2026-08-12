@@ -43,11 +43,10 @@ static int __detect_task_offsets(void)
         return -1;
     }
 
-    /* Set a known comm value to scan for */
-    get_task_comm((char *)cur->comm, cur);
+    /* cur->comm already holds the process name; scan for it directly */
     base = (unsigned char *)cur;
 
-    /* Scan task_struct for the comm field (we know its value from get_task_comm) */
+    /* Scan task_struct for the comm field */
     for (i = 0; i < scan_size; i += sizeof(void *)) {
         if (i + TASK_COMM_LEN > scan_size)
             break;
