@@ -1,0 +1,17 @@
+register_kprobe
+unregister_kprobe
+kallsyms_lookup_name
+filp_open
+filp_close
+kernel_read
+kernel_write
+find_task_by_vpid
+get_task_mm
+mmput
+access_remote_vm
+access_process_vm
+virt_to_phys
+phys_to_virt
+ioremap
+iounmap
+saved_command_line
